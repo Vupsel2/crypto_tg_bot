@@ -11,32 +11,36 @@ async def check_price_alerts(bot: Bot):
     while True:
         from database.dynamodb import get_all_price_alerts, delete_price_alert
         alerts = await get_all_price_alerts()
-
+        print(f"1.получили алерты {alerts}")
         if not alerts:
-            await asyncio.sleep(300) 
+            print(f"1. алерты пустые эжем 100 сек {alerts}")
+            await asyncio.sleep(100) 
             continue
 
         currencies = list(set(alert['currency'] for alert in alerts))
-        print(currencies)
         
-
         from services.crypto_api import get_crypto_price
         prices = await get_crypto_price([currency.lower() for currency in currencies], ['usd'])
-        print(prices)
-
-
+        print(f"старт з алертс {alerts}")
         for alert in alerts:
             user_id = alert['user_id']
             currency = alert['currency']
             target_price = float(alert['price'])
             current_price = prices.get(currency.lower(), {}).get('usd')
+            if alert['type'] == 'above':
+                if current_price is not None and current_price >= target_price:
 
-            if current_price is not None and current_price >= target_price:
-
-                await bot.send_message(user_id, f"🚀 {currency} достиг цены ${current_price}!")
+                    await bot.send_message(user_id, f"🚀 {currency} став більше ніж ${target_price}!\n Наразі його ціна ${current_price}!")
 
 
-                await delete_price_alert(user_id, currency, target_price)
+                    await delete_price_alert(user_id, currency, target_price)
+            else:
+                if current_price is not None and current_price <= target_price:
+
+                    await bot.send_message(user_id, f"📉 {currency} впав нижче ${target_price}!\n Наразі його ціна ${current_price}!")
+
+
+                    await delete_price_alert(user_id, currency, target_price)
 
         await asyncio.sleep(100) 
 

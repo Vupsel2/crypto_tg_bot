@@ -21,7 +21,7 @@ async def save_user(user_id, name, wallet):
         }
     )
 
-async def save_price_alert(user_id, currency, price):
+async def save_price_alert(user_id, currency, price,alert_type ):
     table = dynamodb.Table('PriceAlerts')
     currency_price = f"{currency}#{price}"
     table.put_item(
@@ -29,7 +29,8 @@ async def save_price_alert(user_id, currency, price):
             'user_id': str(user_id),
             'currency_price': currency_price,
             'currency': currency,
-            'price': Decimal(str(price))
+            'price': Decimal(str(price)),
+            'type': alert_type,
         }
     )
 

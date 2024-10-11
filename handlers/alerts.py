@@ -13,20 +13,17 @@ class AlertCallbackData(CallbackData, prefix="alert"):
     action: str
     currency: str
     price: str
-
-class CancelCallbackData(CallbackData, prefix="cancel"):
-    action: str
-
-
+ 
 
 class AlertStates(StatesGroup):
     waiting_for_currency = State()
     waiting_for_price = State()
+    waiting_for_type = State()
 
 @router.message(Command("set_alert"))
 async def set_alert_command(message: types.Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Скасувати", callback_data=CancelCallbackData(action="cancel").pack())]
+        [InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel")]
     ])
     
     await message.answer("Введіть символ криптовалюти (наприклад, bitcoin, ethereum):", reply_markup=keyboard)
@@ -35,7 +32,7 @@ async def set_alert_command(message: types.Message, state: FSMContext):
 @router.message(AlertStates.waiting_for_currency)
 async def process_currency(message: types.Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Скасувати", callback_data=CancelCallbackData(action="cancel").pack())]
+        [InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel")]
     ])
     currency = message.text
     from services.crypto_api import get_crypto_price
@@ -51,28 +48,42 @@ async def process_currency(message: types.Message, state: FSMContext):
 @router.message(AlertStates.waiting_for_price)
 async def process_price(message: types.Message, state: FSMContext):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Скасувати", callback_data=CancelCallbackData(action="cancel").pack())]
+        [InlineKeyboardButton(text="⬆️Вища", callback_data="above")],
+        [InlineKeyboardButton(text="⬇️Нижча", callback_data="below")],
+        [InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel")]
     ])
     try:
         price = float(message.text)
     except ValueError:
         await message.answer("Будь ласка, введіть правильне число для ціни.", reply_markup=keyboard)
         return
-
     user_data = await state.get_data()
     currency = user_data['currency']
+    await state.update_data(price=price)
+    await message.answer(f"Ви хочете отримати повідомленя коли ціна {currency} буде нижча чи вища за {price}$?", reply_markup=keyboard)
 
-    from database.dynamodb import save_price_alert
-    await save_price_alert(message.from_user.id, currency, price)
+    
 
-    await message.answer(f"Сповіщення встановлено: {currency} досягне {price}$")
-    await state.clear()
 
-@router.callback_query(CancelCallbackData.filter(F.action == "cancel"))
+@router.callback_query(lambda c: c.data and c.data.startswith("cancel"))
 async def cancel_alert(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("Додавання сповіщення скасовано.")
+    
+@router.callback_query(lambda c: c.data and c.data.startswith("above") or c.data.startswith("below"))
+async def cancel_alert(callback: types.CallbackQuery, state: FSMContext):
+    user_data = await state.get_data()
+    currency = user_data['currency']
+    price= user_data['price']
+    print("data",callback.data)
 
+    from database.dynamodb import save_price_alert
+    await save_price_alert(callback.from_user.id, currency, price, callback.data)
+    await state.clear()
+    if callback.data.startswith('above'):
+        await callback.message.edit_text(f'Ви отримаєте повідомленя коли криптовалюта {currency} буде выща за {price}$')
+    else:
+        await callback.message.edit_text(f'Ви отримаєте повідомленя коли криптовалюта {currency} буде нижча за {price}$')
 
 @router.message(Command(commands=["my_alerts"]))
 async def show_my_alerts(message: types.Message):
@@ -91,7 +102,10 @@ async def show_my_alerts(message: types.Message):
 
     response = "Ваші активні сповіщення:\n"
     for alert in alerts:
-        response += f"- {alert['currency']} при ціні ${alert['price']}\n"
+        if alert['type']=='above':
+            response += f"- Якщо {alert['currency']} підніметься више ${alert['price']}\n"
+        else:
+            response += f"- Якщо {alert['currency']} опуститься нижче ${alert['price']}\n"
 
     await message.answer(response, reply_markup=keyboard)
 
@@ -116,7 +130,7 @@ async def show_delete_menu(query: types.CallbackQuery, callback_data: AlertCallb
             price=str(alert['price'])
         ).pack()
         keyboard_builder.button(text=button_text, callback_data=callback_data)
-    keyboard_builder.button(text="Скасувати", callback_data=AlertCallbackData(action="cancel_delete", currency="", price="").pack())
+    keyboard_builder.button(text="❌ Скасувати", callback_data=AlertCallbackData(action="cancel_delete", currency="", price="").pack())
 
     keyboard = keyboard_builder.adjust(1).as_markup()
 
